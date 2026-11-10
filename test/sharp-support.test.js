@@ -39,6 +39,15 @@ describe('chooseSharp', () => {
       }
       return `sharp from ${id}`;
     };
+    // require.resolve: находит модуль, не загружая его
+    fn.resolve = (id) => {
+      if (!available.includes(id)) {
+        const error = new Error(`Cannot find module '${id}'`);
+        error.code = 'MODULE_NOT_FOUND';
+        throw error;
+      }
+      return id;
+    };
     return { calls, fn };
   }
 
@@ -62,6 +71,13 @@ describe('chooseSharp', () => {
       ...oldCpu, cpuinfo: 'flags : sse4_2',
     });
     assert.equal(sharp, 'sharp from sharp');
+  });
+
+  it('should say sharp is not installed rather than blame an old CPU', () => {
+    const req = fakeRequire([]);
+    const { reason, sharp } = chooseSharp(['/usr/lib/node_modules/sharp'], req.fn, oldCpu);
+    assert.equal(sharp, null);
+    assert.match(reason, /not installed/);
   });
 
   it('should explain that sharp is not installed', () => {

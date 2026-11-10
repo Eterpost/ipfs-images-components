@@ -52,21 +52,24 @@ function chooseSharp(systemPaths, requireFn, system) {
       }
     }
   }
+  const missing = {
+    reason: `sharp is not installed (system package: ${systemPaths.join(', ')})`,
+    sharp: null,
+  };
+  // Есть ли sharp из npm — без загрузки: на старом процессоре загрузка роняет процесс
+  try {
+    requireFn.resolve('sharp');
+  } catch (error) {
+    if (isMissing(error, 'sharp')) {
+      return missing;
+    }
+    throw error;
+  }
   const reason = sharpUnsupportedReason(system);
   if (reason) {
     return { reason, sharp: null };
   }
-  try {
-    return { reason: null, sharp: requireFn('sharp') };
-  } catch (error) {
-    if (!isMissing(error, 'sharp')) {
-      throw error;
-    }
-  }
-  return {
-    reason: `sharp is not installed (system package: ${systemPaths.join(', ')})`,
-    sharp: null,
-  };
+  return { reason: null, sharp: requireFn('sharp') };
 }
 
 /**
