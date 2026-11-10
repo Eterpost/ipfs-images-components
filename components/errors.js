@@ -1,20 +1,30 @@
 'use strict';
 
 /**
- * Represents custom error which is thrown when file is not found.
+ * Базовая ошибка компонентов: имя класса в name.
  */
-class FileNotFoundError extends Error {
+class ComponentError extends Error {
   /**
-   * constructor for FileNotFoundError class.
-   * @param  {String} message Error message.
+   * @param {string} message - Текст ошибки
    */
   constructor(message) {
-    super();
-    this.message = message;
+    super(message);
     this.name = this.constructor.name;
-    Error.captureStackTrace(this, this.constructor);
   }
 }
 
-module.exports = {};
-module.exports.FileNotFoundError = FileNotFoundError;
+/** Файл или запись не найдены. */
+class FileNotFoundError extends ComponentError {}
+
+/** Тип файла не разрешён (server.allowedTypes). */
+class UnsupportedTypeError extends ComponentError {}
+
+/** Файл больше server.size. */
+class FileTooLargeError extends ComponentError {}
+
+/** Некорректный запрос: нет файла, битая форма. */
+class InvalidInputError extends ComponentError {}
+
+module.exports = {
+  FileNotFoundError, FileTooLargeError, InvalidInputError, UnsupportedTypeError,
+};

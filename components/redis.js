@@ -1,16 +1,35 @@
 'use strict';
 
-const Promise = require('bluebird');
-const redis = require('redis');
+const { createClient } = require('redis');
 
 const settings = require('./settings');
 
-Promise.promisifyAll(redis.RedisClient.prototype);
-Promise.promisifyAll(redis.Multi.prototype);
+let clientPromise = null;
 
-let redisClient = redis.createClient(
-  settings.redis.url,
-  settings.redis.options
-);
+/**
+ * Общее подключение к Redis (settings.redis.url), создаётся при первом вызове.
+ * @return {Promise<import('redis').RedisClientType>}
+ */
+function getClient() {
+  if (!clientPromise) {
+    const client = createClient({ ...settings.redis.options, url: settings.redis.url });
+    client.on('error', (error) => {
+      require('./logging').getWrapperForModule('redis').error(error);
+    });
+    clientPromise = client.connect().then(() => client);
+  }
+  return clientPromise;
+}
 
-module.exports = redisClient;
+/**
+ * Закрывает общее подключение (тесты, остановка сервера).
+ */
+async function close() {
+  if (clientPromise) {
+    const client = await clientPromise;
+    clientPromise = null;
+    await client.quit();
+  }
+}
+
+module.exports = { close, getClient };

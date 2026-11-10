@@ -4,131 +4,82 @@ const winston = require('winston');
 
 const settings = require('./settings');
 
+const LEVELS = ['error', 'warn', 'info', 'verbose', 'debug'];
+
 /**
- * Represents a wrapper for winston logger.
+ * Обёртка над журналом winston: добавляет имя модуля к сообщениям.
  */
 class WinstonLoggerWrapper {
   /**
-   * constructor for WinstonLoggerWrapper class.
-   * @param  {Winston.Logger} logger          An instance of winston.Logger.
-   * @param  {String}         [moduleName=''] Name of module in which logger
-   *                                          is used.
+   * @param {winston.Logger} logger - Журнал winston
+   * @param {string} [moduleName] - Имя модуля
    */
   constructor(logger, moduleName = '') {
     this.logger = logger;
     this.moduleName = moduleName;
-
-    for (let level in winston.levels) {
-      if (Object.prototype.hasOwnProperty.call(winston.levels, level)) {
-        this[level] = this.log.bind(this, level);
-      }
+    for (const level of LEVELS) {
+      this[level] = this.log.bind(this, level);
     }
   }
 
   /**
-   * Returns an instance of WinstonLoggerWrapper.
-   * @param  {String}               moduleName Name of module in which logger
-   *                                           is used.
-   * @return {WinstonLoggerWrapper}            An instance of
-   *                                           WinstonLoggerWrapper.
+   * @param {string} moduleName - Имя модуля
+   * @return {WinstonLoggerWrapper} Журнал для модуля
    */
   getWrapperForModule(moduleName) {
     return new WinstonLoggerWrapper(this.logger, moduleName);
   }
 
   /**
-   * Logs message.
-   * @param  {String}   level    Logging level.
-   * @param  {String[]} messages Messages to log.
+   * @param {string} level - Уровень
+   * @param {...*} messages - Сообщения и ошибки
    */
   log(level, ...messages) {
-    let message = messages.map(handleMessage).join(' ');
-    let moduleInfo = '';
-    if (this.moduleName && String(this.moduleName).length) {
-      moduleInfo = `[${this.moduleName}] `;
-    }
-    this.logger[level](`${moduleInfo}${message}`);
+    const message = messages.map(handleMessage).join(' ');
+    const moduleInfo = this.moduleName ? `[${this.moduleName}] ` : '';
+    this.logger.log(level, `${moduleInfo}${message}`);
   }
 }
 
+const lineFormat = winston.format.printf(({ level, message }) =>
+  `${new Date().toLocaleString('ru-RU')} [${level.toUpperCase()}]: ${message}`);
+
 /**
- * Creates transports for logger.
- * @param  {String[]}             transportsJson      Arrays of transports
- *                                                    options.
- * @param  {Function}             [formatFunc=format] Formatter.
- * @return {Winston.transports[]}                     Array of transports.
+ * @param {Object[]} transportsJson - Транспорты из настроек (console, file)
+ * @return {winston.transport[]}
  */
-function createTransports(transportsJson, formatFunc = format) {
-  let transports = [];
-  let c = 0;
-
-  transportsJson.forEach(function(transport) {
-    switch (transport.type) {
-    case 'console':
-      transports.push(new(winston.transports.Console)({
-        name: 'transport-' + (c++),
-        level: transport.level,
-        formatter: formatFunc,
-        timestamp: time,
-        json: false,
+function createTransports(transportsJson = []) {
+  const transports = [];
+  for (const transport of transportsJson) {
+    if (transport.type === 'console') {
+      transports.push(new winston.transports.Console({ level: transport.level }));
+    } else if (transport.type === 'file') {
+      transports.push(new winston.transports.File({
+        filename: transport.path, level: transport.level,
       }));
-      break;
-    case 'file':
-      transports.push(new(winston.transports.File)({
-        name: 'transport-' + (c++),
-        filename: transport.path,
-        level: transport.level,
-        formatter: formatFunc,
-        timestamp: time,
-        json: false,
-      }));
-      break;
     }
-  });
-
-  return process.env.NODE_ENV === 'test' ? [] : transports;
+  }
+  return transports;
 }
 
 /**
- * Adds stack trace to error messages.
- * @param  {String} message Logging message.
- * @return {String}         Logging message.
+ * @param {*} message - Сообщение или ошибка
+ * @return {string}
  */
 function handleMessage(message) {
   if (message instanceof Error) {
     return message.toString() + ' at: ' + message.stack;
   }
-
-  return message;
+  return String(message);
 }
 
-/**
- * Formatter function.
- * @param  {String[]} options Formatting options.
- * @return {String}           Formatted logging message.
- */
-function format(options) {
-  return time() + ' [' + options.level.toUpperCase() + ']: ' + options.message;
-}
-
-/**
- * Returns date in local format.
- * @return {Date} Current date in ru-Ru locale.
- */
-function time() {
-  return new Date().toLocaleString('ru-RU');
-}
-
-let logger = new WinstonLoggerWrapper(new(winston.Logger)({
-  transports: createTransports(settings.logging.transports),
+const transports = createTransports(settings.logging && settings.logging.transports);
+const logger = new WinstonLoggerWrapper(winston.createLogger({
+  format: lineFormat,
+  level: 'debug',
+  // Без транспортов winston предупреждает при каждой записи
+  silent: transports.length === 0,
+  transports,
 }));
-
-process.on('uncaughtException', (error) => {
-  logger.error('Uncaught exception:', error);
-});
-
-process.on('unhandledRejection', (error) => {
-  logger.error('Unhandled promise rejection:', error);
-});
 
 module.exports = logger;
