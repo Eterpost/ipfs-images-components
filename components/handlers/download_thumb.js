@@ -20,14 +20,17 @@ module.exports = function (thumbnail, metadataStorage, options) {
     const hash = request.params.hash;
     const etag = `"${hash}-${size}"`;
     try {
-      await metadataStorage.getRecord(hash);
+      const record = await metadataStorage.getRecord(hash);
       const headers = fileHeaders(etag, CACHE_DURATION);
       if (isCached(request, etag)) {
         response.writeHead(304, headers).end();
         return;
       }
       const { stream, type } = await thumbnail.serve(hash, size);
-      response.writeHead(200, { ...headers, 'Content-Type': type });
+      // Превью не сделано — отдаётся исходная картинка со своим типом
+      const contentType = type === 'application/octet-stream' && record.mimetype ?
+        record.mimetype : type;
+      response.writeHead(200, { ...headers, 'Content-Type': contentType });
       await pipeline(stream, response);
     } catch (error) {
       sendError(response, error, logging);

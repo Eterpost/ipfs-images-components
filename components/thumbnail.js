@@ -4,10 +4,10 @@ const fsp = require('node:fs/promises');
 const path = require('node:path');
 const { Readable } = require('node:stream');
 const { buffer } = require('node:stream/consumers');
-const sharp = require('sharp');
 
 const logging = require('./logging').getWrapperForModule('thumbnail');
 const settings = require('./settings');
+const { loadSharp } = require('./sharp-support');
 
 const THUMB_DIMENSIONS = 128;
 // Наибольшее число пикселей исходной картинки для превью: файл в несколько
@@ -20,11 +20,15 @@ const DEFAULT_LIMIT_INPUT_PIXELS = 50 * 1000 * 1000;
 class Thumbnail {
   /**
    * @param {Object} storage - Хранилище исходных файлов
-   * @param {{cache?: boolean, path?: string, sizes?: number[],
-   *   limitInputPixels?: number}} [options] - по умолчанию settings.thumbnails
+   * @param {{enabled?: boolean, cache?: boolean, path?: string, sizes?: number[],
+   *   limitInputPixels?: number}} [options] - по умолчанию settings.thumbnails;
+   *   enabled: false (или процессор без SSE4.2) — превью не делаются, отдаётся
+   *   исходная картинка
    */
   constructor(storage, options = settings.thumbnails || {}) {
     this.storage = storage;
+    // sharp загружается только для превью: без него сервер картинок работает
+    this.sharp = options.enabled === false ? null : loadSharp();
     this.cache = Boolean(options.cache);
     this.path = options.path;
     this.sizes = options.sizes || [THUMB_DIMENSIONS];
@@ -36,6 +40,13 @@ class Thumbnail {
    * @param {number} size - Запрошенный размер
    * @return {number} Он же, если разрешён, иначе 128
    */
+  /**
+   * @return {boolean} Делаются ли превью
+   */
+  get available() {
+    return Boolean(this.sharp);
+  }
+
   normalizeSize(size) {
     return this.sizes.includes(size) ? size : THUMB_DIMENSIONS;
   }
@@ -68,6 +79,9 @@ class Thumbnail {
       }
     }
     const original = await buffer(await this.storage.get(hash));
+    if (!this.sharp) {
+      return { stream: Readable.from([original]), type: 'application/octet-stream' };
+    }
     let thumb;
     try {
       thumb = await this.create(original, size);
@@ -88,7 +102,7 @@ class Thumbnail {
    * @return {Promise<Buffer>} JPEG не больше size×size
    */
   create(image, size) {
-    return sharp(image, { limitInputPixels: this.limitInputPixels })
+    return this.sharp(image, { limitInputPixels: this.limitInputPixels })
       .resize(size, size, { fit: 'inside', withoutEnlargement: true })
       .flatten({ background: '#ffffff' })
       .jpeg()

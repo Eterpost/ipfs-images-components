@@ -48,7 +48,9 @@ app.get('/dl/:hash/:filename', components.handlers.download(storage, metadata, {
   `Content-Security-Policy: sandbox`.
 - `handlers.delAttachment(storage, metadata)` — удаляет файл и запись.
 - `thumbnail` — превью через sharp (`thumbnails.sizes`, кэш на диске при
-  `thumbnails.cache`); картинки больше `thumbnails.limitInputPixels` (по
+  `thumbnails.cache`). sharp загружается только для превью; при
+  `thumbnails.enabled: false` или на x86-64 без SSE4.2 (готовая сборка libvips
+  требует x86-64-v2) превью выключены и отдаётся исходная картинка; картинки больше `thumbnails.limitInputPixels` (по
   умолчанию 50 Мпикс) не уменьшаются, отдаются как есть.
 - `Cleaner` удаляет старые файлы только из IPFS-хранилища (нужен
   `getLocalObjects`).

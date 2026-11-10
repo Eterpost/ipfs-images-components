@@ -107,6 +107,23 @@ describe('download, thumbnails and delete', () => {
     assert.deepEqual(Buffer.concat(chunks), picture);
   });
 
+  it('should serve the original picture when thumbnails are disabled', async () => {
+    const disabled = new Thumbnail(storage, { enabled: false, sizes: [64] });
+    assert.equal(disabled.available, false);
+    const app = express();
+    app.get('/thumb/:size/:hash', downloadThumb(disabled, metadata, { CACHE_DURATION: 60 }));
+    const plain = app.listen(0);
+    await new Promise((resolve) => plain.once('listening', resolve));
+    try {
+      const response = await fetch(`http://127.0.0.1:${plain.address().port}/thumb/64/${hash}`);
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get('content-type'), 'image/png');
+      assert.deepEqual(Buffer.from(await response.arrayBuffer()), picture);
+    } finally {
+      plain.close();
+    }
+  });
+
   it('should delete the file and its record', async () => {
     const file = path.join(dir, 'dl-delete');
     fs.writeFileSync(file, 'delete me');

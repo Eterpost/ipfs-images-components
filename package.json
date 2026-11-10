@@ -1,6 +1,6 @@
 {
   "name": "ipfs-images-components",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Components for building an image server (storage backends, metadata, thumbnails)",
   "main": "index.js",
   "scripts": {

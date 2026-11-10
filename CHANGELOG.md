@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.0.1 — 2026-11-11
+
+- sharp is loaded only for thumbnails. On an x86-64 CPU without SSE4.2 (the prebuilt
+  libvips needs x86-64-v2 and crashes the process with SIGILL) or with
+  `thumbnails.enabled: false` thumbnails are off and the original image is served;
+  upload and download keep working.
+
 ## 2.0.0 — 2026-11-10
 
 Node.js 22 and current dependencies; published as Eterpost/ipfs-images-components.
