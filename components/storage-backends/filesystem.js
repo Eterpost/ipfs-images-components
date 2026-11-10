@@ -32,10 +32,19 @@ class FilesystemStorage {
     const content = await fsp.readFile(file.path);
     const hash = this.computeHash(content);
     const filePath = this.getFilePath(hash);
+    if (await this.has(hash)) {
+      return hash;
+    }
     await fsp.mkdir(path.dirname(filePath), { recursive: true });
-    // Через временный файл: недописанный файл не окажется под хешем
-    await fsp.writeFile(filePath + '.tmp', content);
-    await fsp.rename(filePath + '.tmp', filePath);
+    // Через свой временный файл: недописанный файл не окажется под хешем, а
+    // одновременные загрузки одного содержимого не мешают друг другу
+    const tmpPath = `${filePath}.${crypto.randomUUID()}.tmp`;
+    try {
+      await fsp.writeFile(tmpPath, content);
+      await fsp.rename(tmpPath, filePath);
+    } finally {
+      await fsp.rm(tmpPath, { force: true });
+    }
     return hash;
   }
 

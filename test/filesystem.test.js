@@ -33,6 +33,16 @@ describe('FilesystemStorage', () => {
     assert.equal(first, second);
   });
 
+  it('should store the same content uploaded at the same time', async () => {
+    const content = Buffer.alloc(2 * 1024 * 1024, 7);
+    for (let round = 0; round < 5; round++) {
+      const hashes = await Promise.all([1, 2, 3, 4].map(() => storage.add(upload(content))));
+      assert.equal(new Set(hashes).size, 1);
+      assert.deepEqual(fs.readFileSync(storage.getFilePath(hashes[0])), content);
+      await storage.delete(hashes[0]);
+    }
+  });
+
   it('should not find a missing or malformed hash', async () => {
     for (const hash of ['0'.repeat(64), '../../etc/passwd', 'ab']) {
       await assert.rejects(storage.get(hash), FileNotFoundError, hash);
