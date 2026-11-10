@@ -1,120 +1,62 @@
 'use strict';
 
-const Promise = require('bluebird');
-
 const logging = require('./logging').getWrapperForModule('cleaner');
-const Metadata = require('./metadata');
 const redis = require('./redis');
-const Ipfs = require('./storage-backends/ipfs');
 
 /**
- * Represents a cleaner for attachments.
+ * Удаляет файлы, загруженные раньше чем expire секунд назад (по индексу
+ * времени в Redis), из тех, что есть в хранилище.
  */
 class Cleaner {
   /**
-   * Constructor for class cleaner.
-   * @param  {Number} expire   Attachments expiration time in seconds.
-   * @param  {Number} interval Cleaning interval in seconds.
-   * @param  {String} index    Name of sorted set of attachments upload date.
-   * @param  {String} prefix   Prefix for attachments keys.
+   * @param {Object} storage - Хранилище (delete, getLocalObjects)
+   * @param {Metadata} metadata - Метаданные
+   * @param {{expire: number, interval: number}} options - Срок жизни и период, секунды
    */
-  constructor(expire, interval, index, prefix) {
-    this.expire = expire;
-    this.interval = interval;
-
-    this.index = index;
-    this.prefix = prefix;
-
-    let days = this.interval / (60 * 60 * 24);
-    logging.info(`Cleaner set to run each ${days} days`);
+  constructor(storage, metadata, options) {
+    this.storage = storage;
+    this.metadata = metadata;
+    this.expire = options.expire;
+    this.interval = options.interval;
   }
 
   /**
-   * Builds sorted set of datetimes of already uploaded attachments.
-   * @return {Promise} Number of elements added to the set.
+   * Восстанавливает индекс времени по записям метаданных.
+   * @return {Promise<number>} Сколько записей в индексе
    */
-  buildIndex() {
-    logging.info('Building index for old attachments');
-
-    return redis.keysAsync(this.prefix + '*').then((keys) => {
-      this.hashes = keys.map((key) => key.split('_')[1]);
-      logging.info(`Found ${this.hashes.length} attachments`);
-
-      return Promise.map(keys, (key) => redis.hgetallAsync(key));
-    }).each((record, index, length) => {
-      if (length <= 0) throw new RangeError('List must not be empty');
-
-      // Convert UTC string to UNIX timestamp
-      if (isNaN(Number(record.datetime))) {
-        record.datetime = new Date(record.datetime).getTime();
+  async buildIndex() {
+    const client = await redis.getClient();
+    const keys = await client.keys(this.metadata.prefix + '*');
+    for (const key of keys) {
+      const record = await client.hGetAll(key);
+      let datetime = Number(record.datetime);
+      if (isNaN(datetime)) {
+        datetime = new Date(record.datetime).getTime();
       }
-
-      return redis.zaddAsync(this.index, [
-        record.datetime, this.hashes[index],
-      ]).then(() => {
-        logging.info(`Added to index: ${this.hashes[index]}`);
+      await client.zAdd(this.metadata.index, {
+        score: datetime, value: key.slice(this.metadata.prefix.length),
       });
-    });
+    }
+    logging.info(`Indexed ${keys.length} attachments`);
+    return keys.length;
   }
 
   /**
-   * Deletes attachment for hash from both IPFS and Redis.
-   * @param  {String}  hash IPFS hash of attachment.
-   * @return {Promise}      Resolves if deleted, rejects otherwise.
+   * @return {Promise<number>} Сколько файлов удалено
    */
-  delAttachment(hash) {
-    logging.info(`Deleting attachment ${hash}`);
-
-    let ipfs = new Ipfs();
-    let metadata = new Metadata();
-
-    return Promise.join(
-      ipfs.unpin(hash)
-    ).then(() => {
-      logging.info(`Successfully unpinned attachment ${hash}`);
-      return metadata.delRecord(hash);
-    }).then(() => {
-      logging.info(`Deleted metadata for ${hash}`);
-    });
-  }
-
-  /**
-   * Runs cleaner on the current set.
-   * @return {Promise} Number of deleted attachments.
-   */
-  run() {
-    let timestamp = Date.now() - this.expire * 1000;
-    let date = new Date(timestamp).toUTCString();
-    const ipfs = new Ipfs();
-
-    logging.info(`Performing cleanup of attachments uploaded earlier
-                  than '${date}'`);
-
-    logging.info(`Loading list of local attachments (ipfs pin ls). Please be patient, this can take a lot of time`);
-
-    return ipfs.getLocalObjects().then(hashes => {
-      const hashSet = new Set(hashes);
-      logging.info('Looking for outdated attachments...');
-      return redis.zrangebyscoreAsync(this.index, [
-        '-inf', timestamp,
-      ]).then(list => {
-        list = list.filter(hash => hashSet.has(hash));
-        if (list.length <= 0) {
-          logging.info('Nothing to clean');
-          return Promise.resolve(list.length);
-        }
-
-        logging.info(`Deleting ${list.length} attachments`);
-
-        return Promise.map(list, (hash) => {
-          return this.delAttachment(hash);
-        }).then(() => {
-          logging.info(`Successfully deleted ${list.length} attachments`);
-        });
-      }).catch((error) => {
-        logging.error(error);
-      });
-    });
+  async run() {
+    const timestamp = Date.now() - this.expire * 1000;
+    logging.info(`Cleaning attachments uploaded before ${new Date(timestamp).toUTCString()}`);
+    const local = new Set(await this.storage.getLocalObjects());
+    const client = await redis.getClient();
+    const outdated = (await client.zRangeByScore(this.metadata.index, '-inf', timestamp))
+      .filter((hash) => local.has(hash));
+    for (const hash of outdated) {
+      await this.storage.delete(hash);
+      await this.metadata.delRecord(hash);
+      logging.info(`Deleted attachment ${hash}`);
+    }
+    return outdated.length;
   }
 }
 

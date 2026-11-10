@@ -1,139 +1,94 @@
 'use strict';
 
-const fs = require('fs-extra');
-const path = require('path');
-const Promise = require('bluebird');
+const fsp = require('node:fs/promises');
+const path = require('node:path');
+const { Readable } = require('node:stream');
+const { buffer } = require('node:stream/consumers');
 const sharp = require('sharp');
 
-const FileNotFoundError = require('./errors').FileNotFoundError;
 const logging = require('./logging').getWrapperForModule('thumbnail');
 const settings = require('./settings');
-
-Promise.promisifyAll(fs);
 
 const THUMB_DIMENSIONS = 128;
 
 /**
- * Represents Thumbnail class.
+ * Превью картинок (JPEG на белом фоне), при thumbnails.cache — с кэшем на диске.
  */
 class Thumbnail {
   /**
-   * Constructor for Thumbnail class.
+   * @param {Object} storage - Хранилище исходных файлов
+   * @param {{cache?: boolean, path?: string, sizes?: number[]}} [options] -
+   *   по умолчанию settings.thumbnails
    */
-  constructor (storage) {
-    this.cache = settings.thumbnails.cache;
-    this.sizes = settings.thumbnails.sizes;
+  constructor(storage, options = settings.thumbnails || {}) {
     this.storage = storage;
-
-    if (this.cache) {
-      logging.verbose('Thumbnail cache enabled');
-    } else {
-      logging.verbose('Thumbnail cache disabled');
-    }
+    this.cache = Boolean(options.cache);
+    this.path = options.path;
+    this.sizes = options.sizes || [THUMB_DIMENSIONS];
+    logging.verbose(`Thumbnail cache ${this.cache ? 'enabled' : 'disabled'}`);
   }
 
   /**
-   * Concatenates pieces to return path to directory for thumbnail.
-   * @param  {String} hash File hash.
-   * @param  {Number} size Size of thumbnail.
-   * @return {String}      Path to directory for thumbnail.
+   * @param {number} size - Запрошенный размер
+   * @return {number} Он же, если разрешён, иначе 128
    */
-  getThumbsDir(hash, size) {
-    // QmABHA5h..., 128 => /path/128/AB/
-    return path.join(settings.thumbnails.path,
-                     String(size),
-                     hash.slice(0, 2),
-                     hash.slice(2, 4));
+  normalizeSize(size) {
+    return this.sizes.includes(size) ? size : THUMB_DIMENSIONS;
   }
 
   /**
-   * Concatenates pieces to return path to thumbnail.
-   * @param  {String} hash File hash.
-   * @param  {Number} size Size of thumbnail.
-   * @return {String}      Path to thumbnail.
+   * @param {string} hash - Хеш файла
+   * @param {number} size - Размер
+   * @return {string} Путь к превью в кэше
    */
   getThumbsPath(hash, size) {
-    // QmABHA5h..., 128 => /path/128/AB/QmABHA5h...
-    return path.join(this.getThumbsDir(hash, size),
-                     hash);
+    return path.join(this.path, String(size), hash.slice(0, 2), hash.slice(2, 4), hash);
   }
 
   /**
-   * Serves thumbnail.
-   * @param  {String} hash File hash.
-   * @param  {Number} size Size of thumbnail.
-   * @return {Promise}     Stream of thumbnail.
+   * Превью; если картинку не удалось разобрать — исходный файл.
+   * @param {string} hash - Хеш файла
+   * @param {number} size - Размер
+   * @return {Promise<{stream: Readable, type: string}>}
    */
-  serve(hash, size) {
-    if (this.sizes.indexOf(size) == -1) size = THUMB_DIMENSIONS;
-
-    let core = function(hash, size) {
-      logging.verbose(`Getting original image for ${hash} from storage`);
-      return this.storage.get(hash).then((stream) => {
-        return this.create(stream, hash, size).then((stream) => {
-          logging.verbose(`Created ${size}x${size} thumbnail for ${hash}`);
-          return stream;
-        }).catch(() => {
-          logging.verbose(`Failed to create ${size}x${size} thumbnail
-                           for ${hash}`);
-          return stream;
-        });
-      });
-    };
-
-    if (this.cache) {
-      let thumbsDir = this.getThumbsDir(hash, size);
-      let thumbPath = this.getThumbsPath(hash, size);
-
-      return fs.statAsync(thumbPath).then(() => {
+  async serve(hash, size) {
+    size = this.normalizeSize(size);
+    const cachePath = this.cache ? this.getThumbsPath(hash, size) : null;
+    if (cachePath) {
+      try {
+        const cached = await fsp.readFile(cachePath);
         logging.verbose(`Serving thumbnail for ${hash} from cache`);
-        return fs.createReadStream(thumbPath);
-      }).catch(() => {
-        logging.verbose(`Thumbnail for ${hash} wasn't found on local drive`);
-        return fs.ensureDirAsync(thumbsDir).then(() => {
-          return core.call(this, hash, size);
-        }).then((stream) => {
-          if (!(stream && stream.pipe))
-            throw new FileNotFoundError('No file or stream provided');
-
-          logging.verbose(`Caching thumbnail for ${hash}`);
-          let wstream = fs.createWriteStream(thumbPath);
-          stream.pipe(wstream);
-
-          logging.verbose(`Serving thumbnail for ${hash} to client`);
-          return stream;
-        });
-      });
-    } else {
-      return core.call(this, hash, size).then((stream) => {
-        logging.verbose(`Serving thumbnail for ${hash} to client`);
-        return stream;
-      });
+        return { stream: Readable.from([cached]), type: 'image/jpeg' };
+      } catch {
+        // нет в кэше — создаём
+      }
     }
+    const original = await buffer(await this.storage.get(hash));
+    let thumb;
+    try {
+      thumb = await this.create(original, size);
+    } catch (error) {
+      logging.verbose(`Failed to create ${size}x${size} thumbnail for ${hash}: ${error.message}`);
+      return { stream: Readable.from([original]), type: 'application/octet-stream' };
+    }
+    if (cachePath) {
+      await fsp.mkdir(path.dirname(cachePath), { recursive: true });
+      await fsp.writeFile(cachePath, thumb);
+    }
+    return { stream: Readable.from([thumb]), type: 'image/jpeg' };
   }
 
   /**
-   * Creates thumbnail for image.
-   * @param  {Stream}  inputStream Stream of image.
-   * @param  {String}  hash        Hash of thumbnail.
-   * @param  {Number}  size        Size of thumbnail.
-   * @return {Promise}             Stream of thumbnail.
+   * @param {Buffer} image - Исходная картинка
+   * @param {number} size - Размер
+   * @return {Promise<Buffer>} JPEG не больше size×size
    */
-  create(inputStream, hash, size) {
-    logging.verbose(`Creating ${size}x${size} thumbnail for ${hash}`);
-
-    let resizer = sharp()
-      .resize(size, size)
-      .background({r: 255, g: 255, b: 255, alpha: 0})
-      .flatten()
-      .jpeg();
-
-    let outputStream = inputStream.pipe(resizer);
-
-    return new Promise((resolve, reject) => {
-      resizer.on('end', resolve(outputStream));
-      resizer.on('error', reject);
-    });
+  create(image, size) {
+    return sharp(image)
+      .resize(size, size, { fit: 'inside', withoutEnlargement: true })
+      .flatten({ background: '#ffffff' })
+      .jpeg()
+      .toBuffer();
   }
 }
 

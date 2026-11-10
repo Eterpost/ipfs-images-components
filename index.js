@@ -4,6 +4,7 @@ const path = require('path');
 
 const mods = [
   'cleaner',
+  'file-type',
   'errors',
   'logging',
   'metadata',
@@ -27,7 +28,7 @@ module.exports = {
 };
 
 mods.forEach((mod) => {
-  module.exports[mod] = require(
+  module.exports[mod.replace(/-(\w)/g, (m, c) => c.toUpperCase())] = require(
     path.join(__dirname, 'components', mod)
   );
 });

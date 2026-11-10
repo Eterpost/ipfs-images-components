@@ -1,82 +1,48 @@
 'use strict';
 
-const ipfsAPI = require('ipfs-api');
-const Promise = require('bluebird');
-
-const logging = require('./logging').getWrapperForModule('ipfs');
+const logging = require('./logging').getWrapperForModule('pin');
 const redis = require('./redis');
-const settings = require('./settings');
-
-const MAX_CONCURRENT_PINS = 100;
 
 /**
- * Represents an interface to interact with IPFS daemon and Redis
- * to pin attachments.
+ * Закрепление в IPFS всех файлов, известных по метаданным.
  */
 class Pin {
   /**
-   * Constructor for Pin class.
+   * @param {IpfsStorage} storage - Хранилище IPFS (pin, getLocalObjects)
+   * @param {Metadata} metadata - Метаданные
    */
-  constructor() {
-    this.ipfs = ipfsAPI(settings.ipfs.url);
-    this.prefix = settings.redis.prefix.attachments;
+  constructor(storage, metadata) {
+    this.storage = storage;
+    this.metadata = metadata;
   }
 
   /**
-   * Pins attachments to local storage for which there are records in Redis.
-   * @return {Promise} Number of pinned attachments.
+   * @return {Promise<string[]>} Хеши всех файлов из метаданных
    */
-  all() {
-    logging.info('Pinning all attachments available in the database');
-
-    return redis.keysAsync(this.prefix + '*').then((keys) => {
-      let hashes = keys.map((key) => key.split('_')[1]);
-      logging.info(`Found ${hashes.length} attachments`);
-
-      let counter = 0;
-      return Promise.map(hashes, (hash) => {
-        return this.ipfs.pin.add(hash).then(() => {
-          logging.info(`Pinned ${hash}, ${++counter}/${hashes.length}`);
-        });
-      }, {
-        concurrency: MAX_CONCURRENT_PINS,
-      });
-    }).then(() => {
-      logging.info('Successfully pinned all attachments');
-    }).catch((error) => {
-      throw error;
-    });
+  async hashes() {
+    const client = await redis.getClient();
+    const keys = await client.keys(this.metadata.prefix + '*');
+    return keys.map((key) => key.slice(this.metadata.prefix.length));
   }
 
   /**
-   * Checks if IPFS objects for hashes found in Redis are stored locally.
-   * @return {Promise} Resolves with array of unpinned hashes or rejects with
-   *                   error. If array is empty, all hashes are pinned.
+   * Закрепляет все файлы.
    */
-  check() {
-    logging.info('Checking if all attachments are locally stored');
+  async all() {
+    const hashes = await this.hashes();
+    let counter = 0;
+    for (const hash of hashes) {
+      await this.storage.pin(hash);
+      logging.info(`Pinned ${hash}, ${++counter}/${hashes.length}`);
+    }
+  }
 
-    return Promise.join(
-      this.ipfs.refs.local(),
-      redis.keysAsync(this.prefix + '*')
-    ).spread((refs, keys) => {
-      let hashes = keys.map((key) => key.split('_')[1]);
-      logging.info(`Found ${hashes.length} attachments
-                    and ${refs.length} local objects`);
-
-      // if nothing is pinned
-      if (!refs.length)
-        return hashes;
-
-      // if no hashes is found no need to filter
-      if (!hashes.length)
-        return []
-
-      // filter pinned attachments from an array of hashes
-      return hashes.filter(Array.prototype.includes.bind(refs));
-    }).catch((error) => {
-      throw error;
-    });
+  /**
+   * @return {Promise<string[]>} Файлы из метаданных, которых нет в хранилище
+   */
+  async check() {
+    const local = new Set(await this.storage.getLocalObjects());
+    return (await this.hashes()).filter((hash) => !local.has(hash));
   }
 }
 

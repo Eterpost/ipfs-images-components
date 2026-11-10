@@ -4,30 +4,25 @@ const { FileNotFoundError } = require('../errors');
 const logging = require('../logging').getWrapperForModule('del_attachment');
 
 /**
- * Created route handler for deleting attachments
- * @param {Storage} storage - File storage
- * @return {Function} Express handler
+ * Обработчик DELETE /<base-url>/:hash: удаляет файл и его метаданные.
+ * @param {Object} storage - Хранилище
+ * @param {Object} metadataStorage - Метаданные
+ * @return {Function} Обработчик Express
  */
-module.exports = function (storage) {
-  return function (request, response) {
-    let hash = request.params.hash;
-
-    let sendResponse = () => {
+module.exports = function (storage, metadataStorage) {
+  return async function (request, response) {
+    const hash = request.params.hash;
+    try {
+      await storage.delete(hash);
+      await metadataStorage.delRecord(hash);
       response.sendStatus(200);
-    };
-
-    let handleError = (error) => {
+    } catch (error) {
       if (error instanceof FileNotFoundError) {
         response.sendStatus(404);
       } else {
-        response.sendStatus(500);
         logging.error(error);
+        response.sendStatus(500);
       }
-    };
-
-    return storage
-      .delete(hash)
-      .then(sendResponse)
-      .catch(handleError);
+    }
   };
 };
