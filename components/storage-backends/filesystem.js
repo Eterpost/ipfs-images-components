@@ -1,73 +1,115 @@
-const Promise = require('bluebird');
-const fs = require('fs-extra');
-const crypto = require('crypto');
-const path = require('path');
+'use strict';
+
+const crypto = require('node:crypto');
+const fs = require('node:fs');
+const fsp = require('node:fs/promises');
+const path = require('node:path');
+
+const { FileNotFoundError } = require('../errors');
 const logging = require('../logging').getWrapperForModule('filesystem');
 
-
 const HASH_ALGORITHM = 'sha256';
+const HASH_PATTERN = /^[0-9a-f]{64}$/;
 
+/**
+ * Хранилище в файловой системе: файл лежит по своему sha256
+ * (<basePath>/ab/cdef...), одинаковое содержимое хранится один раз.
+ */
 class FilesystemStorage {
   /**
-   * @param {string} basePath - A root directory for all stored files
+   * @param {string} basePath - Корневой каталог файлов
    */
-  constructor (basePath) {
+  constructor(basePath) {
     this.basePath = basePath;
   }
 
   /**
-   * Uploads attachment to file storage.
-   * @param {File} file Multipart/form-data file.
-   * @return {Promise<string>} Hash of uploaded attachment.
+   * @param {{path: string, originalFilename?: string}} file - Загруженный файл
+   * @return {Promise<string>} Хеш файла
    */
-  add (file) {
+  async add(file) {
     logging.verbose(`Uploading '${file.originalFilename}' to filesystem`);
-
-    return fs.readFile(file.path).then(content => {
-      const hash = this.computeHash(content);
-      const filePath = this.getFilePath(hash);
-  
-      return fs.outputFile(filePath, content).then(() => hash);
-    });
+    const content = await fsp.readFile(file.path);
+    const hash = this.computeHash(content);
+    const filePath = this.getFilePath(hash);
+    await fsp.mkdir(path.dirname(filePath), { recursive: true });
+    // Через временный файл: недописанный файл не окажется под хешем
+    await fsp.writeFile(filePath + '.tmp', content);
+    await fsp.rename(filePath + '.tmp', filePath);
+    return hash;
   }
 
   /**
-   * Deletes a file.
-   * 
-   * @param {string} hash - Hash of file to delete
-   * @return {Promise<void>}
+   * @param {string} hash - Хеш файла
    */
-  delete (hash) {
+  async delete(hash) {
     logging.verbose(`Deleting file ${hash} from filesystem`);
-    
-    const filePath = this.getFilePath(hash);
-    return fs.remove(filePath);
+    try {
+      await fsp.unlink(this.getFilePath(hash));
+    } catch (error) {
+      throw notFound(error, hash);
+    }
   }
 
   /**
-   * Gets file from IPFS.
-   * @param  {String} hash IPFS hash.
-   * @return {ReadableStream} Readable Stream of attachment.
+   * @param {string} hash - Хеш файла
+   * @return {Promise<import('stream').Readable>} Содержимое
    */
-  get (hash) {
+  async get(hash) {
     logging.verbose(`Serving attachment for ${hash} from filesystem`);
-
     const filePath = this.getFilePath(hash);
+    try {
+      await fsp.access(filePath, fs.constants.R_OK);
+    } catch (error) {
+      throw notFound(error, hash);
+    }
     return fs.createReadStream(filePath);
   }
 
-
-  computeHash (file) {
-    const hash = crypto.createHash(HASH_ALGORITHM);
-    hash.update(file);
-    return hash.digest('hex');
+  /**
+   * @param {string} hash - Хеш файла
+   * @return {Promise<boolean>}
+   */
+  async has(hash) {
+    try {
+      await fsp.access(this.getFilePath(hash), fs.constants.R_OK);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
-  getFilePath (hash) {
-    const dirName = hash.slice(0, 2);
-    const fileName = hash.slice(2);
-    return path.join(this.basePath, dirName, fileName);
+  /**
+   * @param {Buffer} content - Содержимое
+   * @return {string} sha256 в hex
+   */
+  computeHash(content) {
+    return crypto.createHash(HASH_ALGORITHM).update(content).digest('hex');
   }
+
+  /**
+   * Путь к файлу; не хеш — FileNotFoundError (путь за пределы basePath не строится)
+   * @param {string} hash - Хеш файла
+   * @return {string}
+   */
+  getFilePath(hash) {
+    if (!HASH_PATTERN.test(hash)) {
+      throw new FileNotFoundError(`Invalid hash ${hash}`);
+    }
+    return path.join(this.basePath, hash.slice(0, 2), hash.slice(2));
+  }
+}
+
+/**
+ * @param {Error} error - Ошибка файловой системы
+ * @param {string} hash - Хеш
+ * @return {Error}
+ */
+function notFound(error, hash) {
+  if (error instanceof FileNotFoundError) {
+    return error;
+  }
+  return error.code === 'ENOENT' ? new FileNotFoundError(`File ${hash} not found`) : error;
 }
 
 module.exports = FilesystemStorage;
