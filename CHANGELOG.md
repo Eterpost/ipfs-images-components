@@ -14,6 +14,8 @@ Node.js 22 and current dependencies; published as Eterpost/ipfs-images-component
   `X-Content-Type-Options: nosniff` and `Content-Security-Policy: sandbox`.
 - `delAttachment(storage, metadata)` deletes the metadata record too.
 - Thumbnails wait for sharp and fall back to the original image on failure.
+- Thumbnails refuse to decode images over `thumbnails.limitInputPixels` (50 Mpx).
+- Concurrent uploads of the same content no longer fail.
 - `Cleaner(storage, metadata, options)` and `Pin(storage, metadata)` take their
   dependencies; `Pin#check` returns files missing from the store.
 - Tests run on `node:test`.

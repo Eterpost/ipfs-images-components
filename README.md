@@ -48,7 +48,10 @@ app.get('/dl/:hash/:filename', components.handlers.download(storage, metadata, {
   `Content-Security-Policy: sandbox`.
 - `handlers.delAttachment(storage, metadata)` — удаляет файл и запись.
 - `thumbnail` — превью через sharp (`thumbnails.sizes`, кэш на диске при
-  `thumbnails.cache`).
+  `thumbnails.cache`); картинки больше `thumbnails.limitInputPixels` (по
+  умолчанию 50 Мпикс) не уменьшаются, отдаются как есть.
+- `Cleaner` удаляет старые файлы только из IPFS-хранилища (нужен
+  `getLocalObjects`).
 - `cleaner`, `pin` — обслуживание: удаление старых файлов, закрепление в IPFS.
 
 ## Разработка

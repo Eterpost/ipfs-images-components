@@ -98,6 +98,15 @@ describe('download, thumbnails and delete', () => {
     assert.ok(info.width <= 64 && info.height <= 64, `${info.width}x${info.height}`);
   });
 
+  it('should not decode pictures over the pixel limit', async () => {
+    const limited = new Thumbnail(storage, { cache: false, limitInputPixels: 100, sizes: [64] });
+    const { stream, type } = await limited.serve(hash, 64);
+    assert.equal(type, 'application/octet-stream');
+    const chunks = [];
+    for await (const chunk of stream) chunks.push(chunk);
+    assert.deepEqual(Buffer.concat(chunks), picture);
+  });
+
   it('should delete the file and its record', async () => {
     const file = path.join(dir, 'dl-delete');
     fs.writeFileSync(file, 'delete me');

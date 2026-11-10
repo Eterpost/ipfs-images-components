@@ -10,6 +10,9 @@ const logging = require('./logging').getWrapperForModule('thumbnail');
 const settings = require('./settings');
 
 const THUMB_DIMENSIONS = 128;
+// Наибольшее число пикселей исходной картинки для превью: файл в несколько
+// мегабайт может описывать сотни мегапикселей и занять гигабайты памяти
+const DEFAULT_LIMIT_INPUT_PIXELS = 50 * 1000 * 1000;
 
 /**
  * Превью картинок (JPEG на белом фоне), при thumbnails.cache — с кэшем на диске.
@@ -17,14 +20,15 @@ const THUMB_DIMENSIONS = 128;
 class Thumbnail {
   /**
    * @param {Object} storage - Хранилище исходных файлов
-   * @param {{cache?: boolean, path?: string, sizes?: number[]}} [options] -
-   *   по умолчанию settings.thumbnails
+   * @param {{cache?: boolean, path?: string, sizes?: number[],
+   *   limitInputPixels?: number}} [options] - по умолчанию settings.thumbnails
    */
   constructor(storage, options = settings.thumbnails || {}) {
     this.storage = storage;
     this.cache = Boolean(options.cache);
     this.path = options.path;
     this.sizes = options.sizes || [THUMB_DIMENSIONS];
+    this.limitInputPixels = options.limitInputPixels || DEFAULT_LIMIT_INPUT_PIXELS;
     logging.verbose(`Thumbnail cache ${this.cache ? 'enabled' : 'disabled'}`);
   }
 
@@ -84,7 +88,7 @@ class Thumbnail {
    * @return {Promise<Buffer>} JPEG не больше size×size
    */
   create(image, size) {
-    return sharp(image)
+    return sharp(image, { limitInputPixels: this.limitInputPixels })
       .resize(size, size, { fit: 'inside', withoutEnlargement: true })
       .flatten({ background: '#ffffff' })
       .jpeg()
