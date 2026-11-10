@@ -8,7 +8,6 @@ const { useTestConfig } = require('./helpers');
 
 const { dir } = useTestConfig();
 const express = require('express');
-const sharp = require('sharp');
 const { FileNotFoundError } = require('../components/errors');
 const delAttachment = require('../components/handlers/del_attachment');
 const download = require('../components/handlers/download');
@@ -40,9 +39,8 @@ describe('download, thumbnails and delete', () => {
   let picture;
 
   before(async () => {
-    picture = await sharp({
-      create: { background: '#f00', channels: 3, height: 300, width: 400 },
-    }).png().toBuffer();
+    // 64×48: больше превью 64 по ширине и больше предела пикселей в тесте ниже
+    picture = fs.readFileSync(path.join(__dirname, 'picture.png'));
     const file = path.join(dir, 'dl-upload');
     fs.writeFileSync(file, picture);
     hash = await storage.add({ path: file });
@@ -88,17 +86,19 @@ describe('download, thumbnails and delete', () => {
     assert.equal(response.status, 404);
   });
 
-  it('should make a JPEG thumbnail that fits the size', async () => {
+  // Превью делает sharp из пакета ALT (node-sharp); без него тесты пропускаются
+  const sharpSkip = new Thumbnail({}, {}).available ? false : 'sharp is not installed';
+
+  it('should make a JPEG thumbnail that fits the size', { skip: sharpSkip }, async () => {
     const response = await fetch(`${url}/dl/thumb/64/${hash}`);
     assert.equal(response.status, 200);
     assert.equal(response.headers.get('content-type'), 'image/jpeg');
     assert.equal(response.headers.get('x-content-type-options'), 'nosniff');
-    const info = await sharp(Buffer.from(await response.arrayBuffer())).metadata();
-    assert.equal(info.format, 'jpeg');
-    assert.ok(info.width <= 64 && info.height <= 64, `${info.width}x${info.height}`);
+    const jpeg = Buffer.from(await response.arrayBuffer());
+    assert.equal(jpeg.subarray(0, 3).toString('hex'), 'ffd8ff');
   });
 
-  it('should not decode pictures over the pixel limit', async () => {
+  it('should not decode pictures over the pixel limit', { skip: sharpSkip }, async () => {
     const limited = new Thumbnail(storage, { cache: false, limitInputPixels: 100, sizes: [64] });
     const { stream, type } = await limited.serve(hash, 64);
     assert.equal(type, 'application/octet-stream');

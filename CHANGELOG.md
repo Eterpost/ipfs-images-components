@@ -1,5 +1,14 @@
 # Changelog
 
+## 2.1.0 — 2026-11-11
+
+- sharp is no longer installed from npm (its prebuilt packages bring binaries):
+  it is an optional peer dependency, loaded from the system package
+  (`/usr/lib/node_modules/sharp`, ALT `node-sharp`, or `thumbnails.sharpPath`),
+  then from the project's own `sharp` if the CPU suits its prebuilt build.
+  Without sharp thumbnails are off and the original image is served.
+- Tests run thumbnail checks with `TEST_SHARP_PATH`.
+
 ## 2.0.1 — 2026-11-11
 
 - sharp is loaded only for thumbnails. On an x86-64 CPU without SSE4.2 (the prebuilt

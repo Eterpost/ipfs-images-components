@@ -48,9 +48,12 @@ app.get('/dl/:hash/:filename', components.handlers.download(storage, metadata, {
   `Content-Security-Policy: sandbox`.
 - `handlers.delAttachment(storage, metadata)` — удаляет файл и запись.
 - `thumbnail` — превью через sharp (`thumbnails.sizes`, кэш на диске при
-  `thumbnails.cache`). sharp загружается только для превью; при
-  `thumbnails.enabled: false` или на x86-64 без SSE4.2 (готовая сборка libvips
-  требует x86-64-v2) превью выключены и отдаётся исходная картинка; картинки больше `thumbnails.limitInputPixels` (по
+  `thumbnails.cache`). sharp не ставится из npm (там он с готовыми бинарниками):
+  берётся системный, из пакета ALT `node-sharp` (`/usr/lib/node_modules/sharp`,
+  другой путь — `thumbnails.sharpPath`). Если его нет, а в проекте установлен
+  sharp из npm, используется он — кроме x86-64 без SSE4.2, где его сборка
+  роняет процесс. Без sharp или при `thumbnails.enabled: false` превью
+  выключены и отдаётся исходная картинка; картинки больше `thumbnails.limitInputPixels` (по
   умолчанию 50 Мпикс) не уменьшаются, отдаются как есть.
 - `Cleaner` удаляет старые файлы только из IPFS-хранилища (нужен
   `getLocalObjects`).
@@ -61,5 +64,6 @@ app.get('/dl/:hash/:filename', components.handlers.download(storage, metadata, {
 ```
 npm ci
 TEST_REDIS_URL=redis://127.0.0.1:16379/1 npm test   # без него тесты с Redis пропускаются
+# превью: TEST_SHARP_PATH=/usr/lib/node_modules/sharp (пакет ALT node-sharp)
 npm run lint
 ```

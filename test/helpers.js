@@ -31,7 +31,13 @@ function useTestConfig(overrides = {}) {
       size: 1024 * 1024,
       storage: { options: { basePath: path.join(dir, 'files') }, type: 'filesystem' },
     },
-    thumbnails: { cache: false, path: path.join(dir, 'thumbs'), sizes: [64, 128] },
+    thumbnails: {
+      cache: false,
+      path: path.join(dir, 'thumbs'),
+      // sharp для тестов превью: TEST_SHARP_PATH=/usr/lib/node_modules/sharp
+      ...(process.env.TEST_SHARP_PATH ? { sharpPath: process.env.TEST_SHARP_PATH } : {}),
+      sizes: [64, 128],
+    },
     ...overrides,
   };
   const file = path.join(dir, 'config.json');

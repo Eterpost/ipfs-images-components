@@ -1,6 +1,6 @@
 {
   "name": "ipfs-images-components",
-  "version": "2.0.1",
+  "version": "2.1.0",
   "description": "Components for building an image server (storage backends, metadata, thumbnails)",
   "main": "index.js",
   "scripts": {
@@ -12,7 +12,6 @@
     "kubo-rpc-client": "^7.1.0",
     "multiparty": "^4.3.1",
     "redis": "^5.12.1",
-    "sharp": "^0.35.5",
     "winston": "^3.19.0"
   },
   "engines": {
@@ -27,5 +26,13 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Eterpost/ipfs-images-components.git"
+  },
+  "peerDependencies": {
+    "sharp": ">=0.34"
+  },
+  "peerDependenciesMeta": {
+    "sharp": {
+      "optional": true
+    }
   }
 }
