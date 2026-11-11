@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.1.1 — 2026-11-11
+
+- Without sharp the log says it is not installed (and names the ALT `node-sharp`
+  path) instead of blaming the CPU. Checked with ALT `node-sharp` 0.35.5
+  (libvips 8.18.6).
+
 ## 2.1.0 — 2026-11-11
 
 - sharp is no longer installed from npm (its prebuilt packages bring binaries):
